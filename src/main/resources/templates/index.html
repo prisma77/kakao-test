@@ -98,6 +98,14 @@
       <span class="pill" id="centerLabel">center: - , -</span>
     </div>
     <div class="muted" style="margin-top:6px">관광명소(AT4)는 초록 마커로 표시됩니다.</div>
+
+    <!-- 페이지네이션 컨트롤 -->
+    <div class="row" style="justify-content:space-between; margin-top:8px; display:none;" id="nearbyPagination">
+      <button class="btn small" id="btnPrevPage" disabled>이전</button>
+      <span class="pill" id="pageInfo">페이지 1 / 1</span>
+      <button class="btn small" id="btnNextPage" disabled>다음</button>
+    </div>
+
     <div class="cards" id="nearList" style="margin-top:8px"></div>
   </aside>
 
@@ -159,12 +167,26 @@
       clusterSearch.clear();
       $searchList.innerHTML = '';
       info.close();
+      // 임시 마커도 제거
+      if (window.tempMarker) {
+        window.tempMarker.setMap(null);
+        window.tempMarker = null;
+      }
     }
     function clearNearby(){
       nearMarkers.forEach(m => m.setMap(null));
       nearMarkers = [];
       $nearList.innerHTML = '';
       info.close();
+      // 임시 마커도 제거
+      if (window.tempMarker) {
+        window.tempMarker.setMap(null);
+        window.tempMarker = null;
+      }
+      // 페이지네이션 상태 초기화
+      nearbyCurrentPage = 1;
+      nearbyAllData = [];
+      document.getElementById('nearbyPagination').style.display = 'none';
     }
 
     function card(item, index, color){
@@ -175,7 +197,49 @@
           <p>${item.road_address_name || item.address_name || ''}</p>
           <p>전화: ${item.phone || '-'}</p>
         `;
-      el.onclick = () => map.panTo(new kakao.maps.LatLng(item.y, item.x));
+
+      el.onclick = () => {
+        const pos = new kakao.maps.LatLng(item.y, item.x);
+
+        // 지도 이동
+        map.panTo(pos);
+
+        // 해당 위치에 임시 마커 생성 (기존 임시 마커가 있으면 제거)
+        if (window.tempMarker) {
+          window.tempMarker.setMap(null);
+        }
+
+        // 색상에 따라 다른 마커 이미지 사용
+        let markerImage = null;
+        if (color === 'green') {
+          markerImage = new kakao.maps.MarkerImage(
+                  'https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png',
+                  new kakao.maps.Size(24, 35)
+          );
+        }
+
+        window.tempMarker = new kakao.maps.Marker({
+          position: pos,
+          image: markerImage,
+          map: map
+        });
+
+        // 정보창 표시
+        const prefix = color === 'green' ? '[관광명소] ' : '';
+        info.setContent(`
+          <div style="padding:8px 10px; min-width:180px">
+            <div style="font-weight:600">${prefix}${item.place_name}</div>
+            <div style="font-size:12px; color:#666">${item.road_address_name || item.address_name || ''}</div>
+            ${item.place_url ? `<a href="${item.place_url}" target="_blank" style="font-size:12px">상세보기</a>` : ''}
+          </div>
+        `);
+        info.open(map, window.tempMarker);
+
+        // 카드 하이라이트 효과
+        document.querySelectorAll('.card').forEach(c => c.style.background = 'var(--card)');
+        el.style.background = '#f0f9ff';
+      };
+
       return el;
     }
 
@@ -215,15 +279,27 @@
       }, {useMapBounds:false});
     }
 
+    // 주변 관광명소 페이지네이션 변수
+    let nearbyCurrentPage = 1;
+    let nearbyTotalPages = 1;
+    let nearbyAllData = [];
+    const itemsPerPage = 5; // 한 페이지당 표시할 관광지 수
+
     // 주변 관광명소(AT4) — 초록 별 마커
     function searchNearby(){
       clearNearby();
+      nearbyCurrentPage = 1;
       const center = map.getCenter();
       const opt = { location: center, radius: 5000 };
 
       places.categorySearch('AT4', (data, status) => {
         if(status !== kakao.maps.services.Status.OK) return alert('주변 관광명소가 없습니다.');
 
+        // 모든 데이터를 저장
+        nearbyAllData = data;
+        nearbyTotalPages = Math.ceil(data.length / itemsPerPage);
+
+        // 지도에 모든 마커 표시
         data.forEach((p, i) => {
           const pos = new kakao.maps.LatLng(p.y, p.x);
           const img = new kakao.maps.MarkerImage(
@@ -244,10 +320,53 @@
               `);
             info.open(map, m);
           });
-
-          $nearList.appendChild(card(p, i, 'green'));
         });
+
+        // 첫 페이지 표시
+        displayNearbyPage();
+        updateNearbyPagination();
       }, opt);
+    }
+
+    // 주변 관광명소 페이지별 표시
+    function displayNearbyPage() {
+      $nearList.innerHTML = '';
+      const startIndex = (nearbyCurrentPage - 1) * itemsPerPage;
+      const endIndex = startIndex + itemsPerPage;
+      const pageData = nearbyAllData.slice(startIndex, endIndex);
+
+      pageData.forEach((p, i) => {
+        $nearList.appendChild(card(p, startIndex + i, 'green'));
+      });
+    }
+
+    // 페이지네이션 UI 업데이트
+    function updateNearbyPagination() {
+      const paginationDiv = document.getElementById('nearbyPagination');
+      const pageInfo = document.getElementById('pageInfo');
+      const btnPrev = document.getElementById('btnPrevPage');
+      const btnNext = document.getElementById('btnNextPage');
+
+      if (nearbyTotalPages > 1) {
+        paginationDiv.style.display = 'flex';
+        pageInfo.textContent = `페이지 ${nearbyCurrentPage} / ${nearbyTotalPages}`;
+
+        btnPrev.disabled = nearbyCurrentPage === 1;
+        btnNext.disabled = nearbyCurrentPage === nearbyTotalPages;
+      } else {
+        paginationDiv.style.display = 'none';
+      }
+    }
+
+    // 페이지 이동 함수
+    function goToNearbyPage(direction) {
+      if (direction === 'prev' && nearbyCurrentPage > 1) {
+        nearbyCurrentPage--;
+      } else if (direction === 'next' && nearbyCurrentPage < nearbyTotalPages) {
+        nearbyCurrentPage++;
+      }
+      displayNearbyPage();
+      updateNearbyPagination();
     }
 
     // 빠른 이동 버튼
@@ -258,6 +377,10 @@
     // 이벤트 바인딩
     $btnSearch.onclick = searchKeyword;
     $btnNearby.onclick = searchNearby;
+
+    // 페이지네이션 버튼 이벤트
+    document.getElementById('btnPrevPage').onclick = () => goToNearbyPage('prev');
+    document.getElementById('btnNextPage').onclick = () => goToNearbyPage('next');
 
     // 엔터로 검색
     $kw.addEventListener('keydown', e => { if(e.key === 'Enter') searchKeyword(); });

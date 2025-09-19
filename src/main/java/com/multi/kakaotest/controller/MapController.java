@@ -37,4 +37,10 @@ public class MapController {
         // 인덱스-3 페이지로 이동
         return "index-3";
     }
+
+    @GetMapping("/tourism-list")
+    public String tourismList(Model model) {
+        // 관광지 페이지별 목록보기 페이지로 이동
+        return "tourism-list";
+    }
 }
