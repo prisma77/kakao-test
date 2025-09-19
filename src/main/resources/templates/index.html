@@ -92,12 +92,18 @@
     <div class="cards" id="searchList"></div>
 
     <div class="hr"></div>
-    <div class="sec-title">주변 관광명소</div>
+    <div class="sec-title">관광지 목록</div>
     <div class="row" style="justify-content:space-between;">
-      <button class="btn" id="btnNearby">현재 중심에서 찾기</button>
-      <span class="pill" id="centerLabel">center: - , -</span>
+      <button class="btn" id="btnLoadTourism">관광지 불러오기</button>
+      <select id="regionFilter">
+        <option value="">전체</option>
+        <option value="서울">서울</option>
+        <option value="부산">부산</option>
+        <option value="제주">제주</option>
+        <option value="경기">경기</option>
+      </select>
     </div>
-    <div class="muted" style="margin-top:6px">관광명소(AT4)는 초록 마커로 표시됩니다.</div>
+    <div class="muted" style="margin-top:6px">DB에 저장된 관광지 목록을 페이지별로 표시합니다.</div>
 
     <!-- 페이지네이션 컨트롤 -->
     <div class="row" style="justify-content:space-between; margin-top:8px; display:none;" id="nearbyPagination">
@@ -184,8 +190,8 @@
         window.tempMarker = null;
       }
       // 페이지네이션 상태 초기화
-      nearbyCurrentPage = 1;
-      nearbyAllData = [];
+      tourismCurrentPage = 1;
+      tourismAllData = [];
       document.getElementById('nearbyPagination').style.display = 'none';
     }
 
@@ -279,94 +285,127 @@
       }, {useMapBounds:false});
     }
 
-    // 주변 관광명소 페이지네이션 변수
-    let nearbyCurrentPage = 1;
-    let nearbyTotalPages = 1;
-    let nearbyAllData = [];
+    // 관광지 목록 페이지네이션 변수
+    let tourismCurrentPage = 1;
+    let tourismTotalPages = 1;
+    let tourismAllData = [];
     const itemsPerPage = 5; // 한 페이지당 표시할 관광지 수
 
-    // 주변 관광명소(AT4) — 초록 별 마커
-    function searchNearby(){
+    // DB에서 관광지 목록 불러오기
+    function loadTourismFromDB(){
       clearNearby();
-      nearbyCurrentPage = 1;
-      const center = map.getCenter();
-      const opt = { location: center, radius: 5000 };
+      tourismCurrentPage = 1;
+      const region = document.getElementById('regionFilter').value;
 
-      places.categorySearch('AT4', (data, status) => {
-        if(status !== kakao.maps.services.Status.OK) return alert('주변 관광명소가 없습니다.');
+      // DB API 호출
+      fetch(`/api/tourism?page=${tourismCurrentPage}&size=${itemsPerPage}&region=${region}`)
+              .then(response => response.json())
+              .then(data => {
+                if (data.content && data.content.length > 0) {
+                  // 모든 데이터를 저장
+                  tourismAllData = data.content;
+                  tourismTotalPages = data.totalPages;
 
-        // 모든 데이터를 저장
-        nearbyAllData = data;
-        nearbyTotalPages = Math.ceil(data.length / itemsPerPage);
+                  // 지도에 모든 마커 표시
+                  data.content.forEach((p, i) => {
+                    const pos = new kakao.maps.LatLng(p.latitude, p.longitude);
+                    const img = new kakao.maps.MarkerImage(
+                            'https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png',
+                            new kakao.maps.Size(24, 35)
+                    );
+                    const m = new kakao.maps.Marker({ position: pos, image: img });
+                    m.setMap(map);
+                    nearMarkers.push(m);
 
-        // 지도에 모든 마커 표시
-        data.forEach((p, i) => {
-          const pos = new kakao.maps.LatLng(p.y, p.x);
-          const img = new kakao.maps.MarkerImage(
-                  'https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png',
-                  new kakao.maps.Size(24, 35)
-          );
-          const m = new kakao.maps.Marker({ position: pos, image: img });
-          m.setMap(map);
-          nearMarkers.push(m);
+                    kakao.maps.event.addListener(m, 'click', () => {
+                      info.setContent(`
+                    <div style="padding:8px 10px; min-width:180px">
+                      <div style="font-weight:600">[관광명소] ${p.name}</div>
+                      <div style="font-size:12px; color:#666">${p.address || ''}</div>
+                      <div style="font-size:12px; color:#666">전화: ${p.phone || '-'}</div>
+                    </div>
+                  `);
+                      info.open(map, m);
+                    });
+                  });
 
-          kakao.maps.event.addListener(m, 'click', () => {
-            info.setContent(`
-                <div style="padding:8px 10px; min-width:180px">
-                  <div style="font-weight:600">[관광명소] ${p.place_name}</div>
-                  <div style="font-size:12px; color:#666">${p.road_address_name || p.address_name || ''}</div>
-                  <a href="${p.place_url}" target="_blank" style="font-size:12px">상세보기</a>
-                </div>
-              `);
-            info.open(map, m);
-          });
-        });
-
-        // 첫 페이지 표시
-        displayNearbyPage();
-        updateNearbyPagination();
-      }, opt);
+                  // 첫 페이지 표시
+                  displayTourismPage();
+                  updateTourismPagination();
+                } else {
+                  alert('관광지 데이터가 없습니다.');
+                }
+              })
+              .catch(error => {
+                console.error('Error:', error);
+                alert('관광지 데이터를 불러오는 중 오류가 발생했습니다.');
+              });
     }
 
-    // 주변 관광명소 페이지별 표시
-    function displayNearbyPage() {
+    // 관광지 목록 페이지별 표시
+    function displayTourismPage() {
       $nearList.innerHTML = '';
-      const startIndex = (nearbyCurrentPage - 1) * itemsPerPage;
+      const startIndex = (tourismCurrentPage - 1) * itemsPerPage;
       const endIndex = startIndex + itemsPerPage;
-      const pageData = nearbyAllData.slice(startIndex, endIndex);
+      const pageData = tourismAllData.slice(startIndex, endIndex);
 
       pageData.forEach((p, i) => {
-        $nearList.appendChild(card(p, startIndex + i, 'green'));
+        // DB 데이터 구조에 맞게 변환
+        const item = {
+          place_name: p.name,
+          address_name: p.address,
+          phone: p.phone,
+          x: p.longitude,
+          y: p.latitude
+        };
+        $nearList.appendChild(card(item, startIndex + i, 'green'));
       });
     }
 
     // 페이지네이션 UI 업데이트
-    function updateNearbyPagination() {
+    function updateTourismPagination() {
       const paginationDiv = document.getElementById('nearbyPagination');
       const pageInfo = document.getElementById('pageInfo');
       const btnPrev = document.getElementById('btnPrevPage');
       const btnNext = document.getElementById('btnNextPage');
 
-      if (nearbyTotalPages > 1) {
+      if (tourismTotalPages > 1) {
         paginationDiv.style.display = 'flex';
-        pageInfo.textContent = `페이지 ${nearbyCurrentPage} / ${nearbyTotalPages}`;
+        pageInfo.textContent = `페이지 ${tourismCurrentPage} / ${tourismTotalPages}`;
 
-        btnPrev.disabled = nearbyCurrentPage === 1;
-        btnNext.disabled = nearbyCurrentPage === nearbyTotalPages;
+        btnPrev.disabled = tourismCurrentPage === 1;
+        btnNext.disabled = tourismCurrentPage === tourismTotalPages;
       } else {
         paginationDiv.style.display = 'none';
       }
     }
 
     // 페이지 이동 함수
-    function goToNearbyPage(direction) {
-      if (direction === 'prev' && nearbyCurrentPage > 1) {
-        nearbyCurrentPage--;
-      } else if (direction === 'next' && nearbyCurrentPage < nearbyTotalPages) {
-        nearbyCurrentPage++;
+    function goToTourismPage(direction) {
+      if (direction === 'prev' && tourismCurrentPage > 1) {
+        tourismCurrentPage--;
+        loadTourismPage();
+      } else if (direction === 'next' && tourismCurrentPage < tourismTotalPages) {
+        tourismCurrentPage++;
+        loadTourismPage();
       }
-      displayNearbyPage();
-      updateNearbyPagination();
+    }
+
+    // 특정 페이지 로드
+    function loadTourismPage() {
+      const region = document.getElementById('regionFilter').value;
+
+      fetch(`/api/tourism?page=${tourismCurrentPage}&size=${itemsPerPage}&region=${region}`)
+              .then(response => response.json())
+              .then(data => {
+                tourismAllData = data.content;
+                displayTourismPage();
+                updateTourismPagination();
+              })
+              .catch(error => {
+                console.error('Error:', error);
+                alert('페이지 데이터를 불러오는 중 오류가 발생했습니다.');
+              });
     }
 
     // 빠른 이동 버튼
@@ -376,11 +415,18 @@
 
     // 이벤트 바인딩
     $btnSearch.onclick = searchKeyword;
-    $btnNearby.onclick = searchNearby;
+    document.getElementById('btnLoadTourism').onclick = loadTourismFromDB;
 
     // 페이지네이션 버튼 이벤트
-    document.getElementById('btnPrevPage').onclick = () => goToNearbyPage('prev');
-    document.getElementById('btnNextPage').onclick = () => goToNearbyPage('next');
+    document.getElementById('btnPrevPage').onclick = () => goToTourismPage('prev');
+    document.getElementById('btnNextPage').onclick = () => goToTourismPage('next');
+
+    // 지역 필터 변경 이벤트
+    document.getElementById('regionFilter').addEventListener('change', function() {
+      if (tourismAllData.length > 0) {
+        loadTourismFromDB();
+      }
+    });
 
     // 엔터로 검색
     $kw.addEventListener('keydown', e => { if(e.key === 'Enter') searchKeyword(); });
